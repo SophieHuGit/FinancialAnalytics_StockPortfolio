@@ -1,0 +1,310 @@
+---
+title: 'Financial Analytics：Efficient Frontier and CAPM, Market-Neutral
+  Portfolios'
+author: "Shuang (Sophie) Hu"
+date: "3/5/2020"
+---
+
+# Step 1. Efficient Frontier and CAPM, Market-Neutral Portfolios
+##1. Description of Portfolio
+Read portfolio consisting of 297 S&P 500 stocks prices for 2014. The data are in the file PortfolioSP500Stocks.csv. In addition to stock prices the file also contains prices of S&P 500 SPDR ETF SPY and Fed Funds rates for the same period.
+```{r}
+datapath<- "/Users/sophie/Desktop/Sophie/MScA Autumn 2019/Financial Analytics/Course Project"
+Data2014<- read.csv(paste(datapath,'assignments_Fonancial Analytics (32001)_Course Assignment_PortfolioSP500Stocks.csv',sep='/'),header=TRUE)
+dim(Data2014)
+head(Data2014[,1])
+head(colnames(Data2014))
+```
+```{r}
+#Transform dates in the first column into date format
+Data2014[,1]<- as.Date(Data2014[,1], origin = "1899-12-30")
+head(Data2014[,1:3])
+```
+
+##2. Efficient Frontier
+Calculate means and standard deviations of daily log-returns for each company.
+Calculate mean and standard deviation of daily log-returns for SPY.
+Calculate mean Fed Funds rate for 2014.
+```{r}
+Mean.Sd.Data2014<-cbind(sd=apply(Data2014[,-c(1,3)],2,function(z) sd(diff(log(z)),na.rm=TRUE)),
+                        mean=apply(Data2014[,-c(1,3)],2,function(z) mean(diff(log(z)),na.rm=TRUE)))
+head(Mean.Sd.Data2014)
+```
+```{r}
+Mean.FedFunds<- mean(Data2014[,3])/100/250
+```
+Plot the SPY companies on standard deviation-mean diagram.
+Observe efficient frontier.
+Add the points for SPY and risk-free rate.
+Add the Capital Allocation Line connecting the points of risk-free rate and SPY.
+```{r}
+plot(Mean.Sd.Data2014[-1,],ylab="Mean",xlab="Sd",pch=19,xlim=c(0,.04),ylim=c(-.0040,.004))
+points(Mean.Sd.Data2014[1,1],Mean.Sd.Data2014[1,2],col="red",pch=19)
+points(0,Mean.FedFunds,col="green",pch=19)
+lines(c(0,4*Mean.Sd.Data2014[1,1]),c(Mean.FedFunds,4*Mean.Sd.Data2014[1,2]),col="red")
+text(Mean.Sd.Data2014[1,1],Mean.Sd.Data2014[1,2],labels="SPY",cex=.8,col="red",pos=2)
+abline(v=Mean.Sd.Data2014[1,1])
+```
+
+The point representing SPY is located at the tip of the frontier. Because this portfolio consists of 297 S&P 500 stocks prices, which are parts of the SPY (i.e. SPY is the index tracking the overall performance of all S&P 500 stocks). Therefore, SPY is located at the tip of the frontier for the highest expected return at the lowest risk.
+
+Find the best capital allocation line in the portfolio, i.e. the tangent to the efficient frontier. Find the stock name forming the tangent portfolio (call it XYZ for now).
+
+The optimal portfolio of risky assets (the tenfency portfolio) has the highest Sharpe Ratio=$(E(R_A)-R_f)/\sigma_A$
+```{r}
+sharpeRatio<- (Mean.Sd.Data2014[,2]-Mean.FedFunds)/Mean.Sd.Data2014[,1]
+stock.Data2014<- data.frame(cbind(Mean.Sd.Data2014, sharpeRatio))
+head(stock.Data2014)
+```
+```{r}
+# Find the stock XYZ corresponding to the highest sharpe ratio
+library(dplyr)
+# Sort by column of sharpRatio (descending)
+stock.Data2014<- stock.Data2014[order(-stock.Data2014$sharpeRatio),]
+stock.Data2014[1,]
+```
+Therefore, the optimal stock XYZ in the portfolio is actually stock KR.
+
+```{r}
+#Plot of the SPY portfolio
+plot(Mean.Sd.Data2014[-1,],ylab="Mean",xlab="Sd",pch=19,xlim=c(0,.04),ylim=c(-.0040,.004))
+points(Mean.Sd.Data2014[1,1],Mean.Sd.Data2014[1,2],col="red",pch=19)
+points(0,Mean.FedFunds,col="green",pch=19)
+lines(c(0,4*Mean.Sd.Data2014[1,1]),c(Mean.FedFunds,4*Mean.Sd.Data2014[1,2]),col="red")
+text(Mean.Sd.Data2014[1,1],Mean.Sd.Data2014[1,2],labels="SPY",cex=.8,col="red",pos=2)
+abline(v=Mean.Sd.Data2014[1,1])
+
+#Add the line of the tangent portfolio
+lines(c(0,4*stock.Data2014[1,1]),c(Mean.FedFunds,4*stock.Data2014[1,2]),col="gold")
+text(stock.Data2014[1,1],stock.Data2014[1,2],labels="KR",cex=.8,col="gold",pos=2)
+```
+
+Plot cumulative returns of SPY and KR
+```{r}
+labDates<- paste(format(Data2014[,1],"%m"),format(Data2014[,1],"%d"),sep="/")
+matplot(Data2014$Date[-1],
+        cbind(cumsum(diff(log(as.vector(Data2014$SPY)))),
+              cumsum(diff(log(as.vector(Data2014$KR))))),type="l",lty=1,lwd=3,col=c("red","gold"),
+        ylab="Cumulative Returns",xlab="Date",xaxt="n")
+axis(side=1,labels=labDates[-1],at=Data2014$Date[-1])
+legend("topleft",legend=c("SPY","KR"),lty=1,col=c("red","gold"))
+```
+
+Create portfolio of the risk free investment and KR that has the same risk as SPY, but with better return. The portfolio point on the efficient frontier chart should be on the capital allocation line for KR.
+
+Based on the same risk of portfolio and SPY, we can get the equation:
+$R_{SPY}=w.R_f*0+w.R_{KR}*R_{KR}$, where $w.R_f$ is the weight of risk-free, $w.R_{KR}$ is the weight of KR in the portfolio. Thus, $w.R_{KR}=R_{SPY}/R_{KR}$
+```{r}
+# Calculate the weight for Risk Free and KR in the portfolio
+w.KR<- sd(diff(log(Data2014$SPY)))/sd(diff(log(Data2014$KR)))
+w.Rf<- 1-w.KR
+cbind(w.Rf, w.KR)
+```
+```{r}
+mixRFKR.returns<- w.Rf*(Data2014$FFRate[-1])/100/365+w.KR*diff(log(as.vector(Data2014$KR)))
+head(mixRFKR.returns)
+```
+```{r}
+labDates<- paste(format(Data2014[,1],"%m"),format(Data2014[,1],"%d"),sep="/")
+matplot(Data2014$Date[-1],
+        cbind(cumsum(diff(log(as.vector(Data2014$SPY)))),
+              cumsum(diff(log(as.vector(Data2014$KR)))),
+              cumsum(mixRFKR.returns)), #Add the trajectory of the Mixed Portfolio
+        type="l",lty=1,lwd=3,col=c("red","gold","purple"),
+        ylab="Cumulative Returns",xlab="Date",xaxt="n")
+axis(side=1,labels=labDates[-1],at=Data2014$Date[-1])
+legend("topleft",legend=c("SPY","KR","Mixed Portfolio"),lty=1,col=c("red","gold","purple"))
+```
+
+Check that risk of the mixed portfolio is the same as risk of SPY.
+```{r}
+c(RiskSPY=sd(diff(log(Data2014$SPY))),RiskMixedPortfolio=sd(mixRFKR.returns))
+```
+
+##3. CAPM
+Define the CAPM model for the portfolio and plot the Security Market Line.
+```{r}
+FedFunds.daily<- Data2014$FFRate/100/365 
+portfolioBetas<- apply(as.matrix(Data2014[,-c(1:3)]),2,
+                      function(z) lm(I(diff(log(z))-FedFunds.daily[-length(FedFunds.daily)])~-1+                                     I(diff(log(Data2014$SPY))-FedFunds.daily[-length(FedFunds.daily)]))$coefficients)
+plot(1:length(portfolioBetas),portfolioBetas,xlab="Index")
+```
+
+Betas are estimated as slopes of each excess log returns sample to the SPY excess log returns.
+
+Select stocks Coca-Cola (KO), Plum Creek Timber (PCL) and Kroger (KR). Find their betas.
+```{r}
+selectedStocksIndex<-c(match("KO",names(portfolioBetas)),
+                       match("PCL",names(portfolioBetas)),
+                       match("KR",names(portfolioBetas)))
+(selectedStocks<- data.frame(portfolioBetas[selectedStocksIndex]))
+```
+
+Create plot in the Betas-Mean Return space:
+```{r}
+# Find mean returns of the selected stocks
+selectedStocksIndex.return<-c(match("KO",names(Mean.Sd.Data2014[,2])),
+                       match("PCL",names(Mean.Sd.Data2014[,2])),
+                       match("KR",names(Mean.Sd.Data2014[,2])))
+(selectedStocks.return<- data.frame(Mean.Sd.Data2014[,2][selectedStocksIndex.return]))
+```
+```{r}
+# Put all stocks of the portfolio on the graph
+plot(portfolioBetas,
+     Mean.Sd.Data2014[-1,2],
+     ylab="Mean Returns",pch=19,xlim=c(0,2))
+
+# Add SPY,the risk free asset and the SML to the plot
+points(1,Mean.Sd.Data2014[1,2],col="red",pch=19)
+points(0,Mean.FedFunds,col="green",pch=19)
+lines(c(0,2),c(Mean.FedFunds,2*Mean.Sd.Data2014[1,2]),col="red")
+text(1,Mean.Sd.Data2014[1,2],labels="SPY",cex=.8,col="red",pos=2)
+
+# Mark the selected stocks
+points(selectedStocks[,1], selectedStocks.return[,1], pch=19,col="gold")
+text(selectedStocks[1,1],selectedStocks.return[1,1],labels="KO",cex=.8,col="black",pos=2)
+text(selectedStocks[2,1],selectedStocks.return[2,1],labels="PCL",cex=.8,col="black",pos=2)
+text(selectedStocks[3,1],selectedStocks.return[3,1],labels="KR",cex=.8,col="black",pos=2)
+```
+
+According to CAPM model which of the selected stocks should have been bought in 2014 and which should have been shorted?
+
+We can observe that, at a certain level of risk, KR has higher return than the market as it is located above the Security Market Line, while PCL is the opposite. KO is a more neutral choice since it has the same return as the market return. Therefore, we should have bought KR and shorted PCL.
+
+
+### Market-Neutral Portfolio
+A portfolio is called long only if it consists of only long positions on assets.
+Similarly, portfolio is short only if it consists only short positions on assets.
+Portfolio is called "market-neutral" if it has both long and short groups of assets and the initial dollar values of these two groups are equal or periodically maintained equal.
+
+Create market-neutral long-short portfolio of the 3 selected stocks. 
+Run back test of the created portfolio.
+```{r}
+c(KR.price=Data2014$KR[1],PCL.price=Data2014$PCL[1])
+```
+```{r}
+longWeight<-Data2014$PCL[1]/Data2014$KR[1]
+longWeight
+```
+
+Long weight shows that: for each shorted share of PCL, the market-neutral portfolio should buy 2.24 shares of KR.
+```{r}
+portfolioValue<- longWeight*Data2014$KR-Data2014$PCL
+plot(portfolioValue,type="l",xlab="2014",ylab="Value of Market-Neutral Portfolio")
+```
+
+Create market-neutral portfolio of stocks according to the CAPM as of the beginning of 2014 and track its value for the rest of the year.
+Define the equation parameters of SML. The two points on this line are: 
+$<x_1,y_1>$= <0,`Mean.FedFunds`>, 
+$<x_2,y_2>$= <1,`Mean.Sd.Data2014[1,2]`>.
+
+Then the line equation is y(x)=a+bx, where 
+$a=y_1$= `Mean.FedFunds`,
+$b=(y(x_2)−a)/x_2$= `Mean.Sd.Data2014[2]`-`Mean.FedFunds`.
+```{r}
+SML<- data.frame(a=Mean.FedFunds,b=Mean.Sd.Data2014[1,2]-Mean.FedFunds)
+SML
+```
+```{r}
+# Calculate required returns of SML
+SML.returns<- data.frame(SML$a+SML$b*portfolioBetas)
+colnames(SML.returns)<- c("requiredReturns")
+head(SML.returns)
+```
+```{r}
+# Create long only portfolio: Select the stocks with returns larger than `SML.returns`
+longPortfolio<- subset(Mean.Sd.Data2014[-1,2], data.frame(Mean.Sd.Data2014[-1,2]) >= SML.returns$requiredReturns)
+longPortfolio<- names(longPortfolio)
+longPortfolio
+```
+```{r}
+# Plot long only portfolio
+plot(portfolioBetas,Mean.Sd.Data2014[-1,2],ylab="Mean Returns",xlab="Betas",pch=19,xlim=c(0,2))
+points(1,Mean.Sd.Data2014[1,2],col="red",pch=19)
+points(0,Mean.FedFunds,col="green",pch=19)
+lines(c(0,2),c(Mean.FedFunds,2*Mean.Sd.Data2014[1,2]),col="red")
+points(portfolioBetas[longPortfolio],Mean.Sd.Data2014[-1,2][longPortfolio],col="gold",pch=16)
+```
+
+Calculate weights of the long only portfolio based on the distance to MAL.
+If $d_i=μ_i−(a+b∗β_i)$ then the portfolio weights $w_i=d_i/(\Sigma_{i=1}d_i)$
+```{r}
+d_i<- Mean.Sd.Data2014[-1,2][longPortfolio]-(SML$a+SML$b*portfolioBetas[longPortfolio])
+longOnlyWeights<- d_i/sum(d_i)
+head(longOnlyWeights)
+```
+```{r}
+plot(longOnlyWeights,type="b")
+```
+```{r}
+sum(longOnlyWeights)
+```
+
+Calculate the initial value of weighted long portfolio.
+```{r}
+longOnlyValue<- as.matrix(Data2014[1,-(1:3)])[,longPortfolio]%*%longOnlyWeights
+longOnlyValue
+```
+```{r}
+# Create short only portfolio: Select the stocks with returns lower than `SML.returns`
+shortPortfolio<- subset(Mean.Sd.Data2014[-1,2], data.frame(Mean.Sd.Data2014[-1,2]) < SML.returns$requiredReturns)
+shortPortfolio<- names(shortPortfolio)
+shortPortfolio
+```
+```{r}
+# Plot short only portfolio
+plot(portfolioBetas,Mean.Sd.Data2014[-1,2],ylab="Mean Returns",xlab="Betas",pch=19,xlim=c(0,2))
+points(1,Mean.Sd.Data2014[1,2],col="red",pch=19)
+points(0,Mean.FedFunds,col="green",pch=19)
+lines(c(0,2),c(Mean.FedFunds,2*Mean.Sd.Data2014[1,2]),col="red")
+points(portfolioBetas[shortPortfolio],Mean.Sd.Data2014[-1,2][shortPortfolio],col="purple",pch=16)
+```
+```{r}
+D_i<- Mean.Sd.Data2014[-1,2][shortPortfolio]-(SML$a+SML$b*portfolioBetas[shortPortfolio])
+shortOnlyWeights<- D_i/sum(D_i)
+head(shortOnlyWeights)
+```
+```{r}
+plot(shortOnlyWeights,type="b")
+```
+```{r}
+sum(shortOnlyWeights)
+```
+
+Calculate the initial value of weighted short portfolio.
+```{r}
+shortOnlyValue<- as.matrix(Data2014[1,-(1:3)])[,shortPortfolio]%*%shortOnlyWeights
+shortOnlyValue
+```
+
+Find the proportion between the long and the short portfolio.
+```{r}
+c(longOnlyValue=longOnlyValue,shortOnlyValue=shortOnlyValue)
+```
+```{r}
+portfolioProportion<-shortOnlyValue/longOnlyValue
+unclass(portfolioProportion)
+```
+```{r}
+c(longOnlyShares=shortOnlyValue/longOnlyValue,shortOnlyShares=1)
+```
+
+Calculate value trajectory of the total portfolio and plot it.
+```{r}
+longValueTrajectory<- as.matrix(Data2014[,-(1:3)])[,longPortfolio]%*%longOnlyWeights
+shortValueTrajectory<- as.matrix(Data2014[,-(1:3)])[,shortPortfolio]%*%shortOnlyWeights
+totalPortfolioTrajectory<- longValueTrajectory%*%portfolioProportion-shortValueTrajectory
+head(totalPortfolioTrajectory)
+```
+```{r}
+plot(totalPortfolioTrajectory,type="l",xlab="2014",ylab="Value of Market-Neutral Portfolio",ylim=c(0,45),xlim=c(0,250))
+```
+
+We can calculate the annual return of the this portfolio based on the formula:
+$Annual Return=((Ending Value/Beginning Value))^{1/Years}-1$, where Years= holding period in years. 
+In this case, the holding period is (252/250) years since there are 252 trading days each year.The annual return of the portfolio is 50.66% according to the calculation below.
+```{r}
+(longValueTrajectory[250]/(shortValueTrajectory[1]))^{252/250}*portfolioProportion-(shortValueTrajectory[250]/(shortValueTrajectory[1]))^{252/250}
+```
+
+

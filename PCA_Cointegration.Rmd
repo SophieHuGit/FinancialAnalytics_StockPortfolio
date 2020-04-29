@@ -1,0 +1,460 @@
+---
+title: 'Financial Analytics: PCA and Market-Neural Portfolio'
+author: "Shuang (Sophie) Hu"
+date: "3/19/2020"
+---
+
+# 1. Loading Portfolio
+Read portfolio consisting of 297 S&P 500 stocks prices for 2014.
+The data are in the file `PortfolioSP500Stocks.csv`.
+In addition to stock prices the file also contains prices of S&P 500 SPDR ETF SPY and Fed Funds rates for the same period.
+```{r}
+datapath<- "/Users/sophie/Desktop/Sophie/MScA Autumn 2019/Financial Analytics/Course Project"
+Data2014<- read.csv(paste(datapath,'assignments_Fonancial Analytics (32001)_Course Assignment_PortfolioSP500Stocks.csv',sep='/'),header=TRUE)
+dim(Data2014)
+head(Data2014[,1])
+```
+```{r}
+head(colnames(Data2014))
+```
+```{r}
+# Transform dates in the first column into date format
+Data2014[,1]<-as.Date(Data2014[,1],origin = "1899-12-30")
+head(Data2014[,1:3])
+```
+```{r}
+# Calculate mean Fed Funds rate for 2014
+Mean.FedFunds<- mean(Data2014[,3])/100/250
+```
+
+# 2. APT
+```{r}
+# Create log returns
+Data2014.Returns<- apply(log(Data2014[,-(1:3)]),2,diff)
+```
+
+## 2.1 Selection of factors
+Select factors by doing PCA on the stock returns.
+```{r}
+Data2014.Returns.PCA<- prcomp(Data2014.Returns)
+names(Data2014.Returns.PCA)
+```
+```{r}
+summary(Data2014.Returns.PCA)$importance[,1:10]
+```
+```{r}
+plot(Data2014.Returns.PCA)
+```
+```{r}
+dim(Data2014.Returns.PCA$rotation)
+```
+Rotation is the matrix of factor loadings.
+Column number i is the loading corresponding to the i-th principal component.
+
+Select a number of market factors, for example, take first factors which explain more than 90% of the variance.
+```{r}
+nFactors<- 10
+factorLoadings<- Data2014.Returns.PCA$rotation[,1:nFactors]
+factorScores<- Data2014.Returns%*%Data2014.Returns.PCA$rotation[,1:nFactors]
+zeroLoading<- Data2014.Returns.PCA$center
+```
+
+Create matrix of approximations of stock returns `nFactorAppr` using the selected number of factors.
+```{r}
+nFactorAppr<- t((factorLoadings)%*%t(factorScores))
+head(nFactorAppr[,1:6])
+```
+
+Calculate vector of determination coefficients (R^2) called `Data2014.Returns.r.squared` for pairs `Data2014.Returns[,i]~nFactorAppr[,i]`. Plot distribution of this vector.
+```{r}
+Data2014.Returns.r.squared<- as.vector(diag(cor(Data2014.Returns,nFactorAppr)^2))
+
+# Plot the distribution of the vector
+plot(density(Data2014.Returns.r.squared), xlab="r.squared", ylab="Density", 
+     type="l", main="Distribution of Determination Coefficients")
+abline(v=mean(Data2014.Returns.r.squared),col="green")
+abline(v=summary(Data2014.Returns.PCA)$importance[3,10],col="red")
+legend("topleft",legend=c("mean.r.squared","expected for nFactors"),lty=1,col=c("green","red"))
+```
+
+**We can observe that:**
+The quality of approximation is good, as the mean R-squared and the expected for nFactors shown by the red green and red lines are quite close.
+It is consistent with the selected number of 10 principle components based on the "Cumulative Proportion" characteristic in the PCA summary output (i.e.`summary(Data2014.Returns.PCA)$importance[3,10]` in this case). We can see the r-squared value is 0.51803.
+
+Compare the determination coefficients with:
+```{r}
+head(Data2014.Returns.r.squared)
+```
+
+```{r}
+# Visualize approximations for several stocks
+checkVariableApproximation<- 5
+plot(Data2014.Returns[,checkVariableApproximation],nFactorAppr[,checkVariableApproximation],type="l")
+```
+
+**Repeat analysis of approximations with several different numbers of selected factors. Use `nFactors` PCA components as market factors for APT model**???
+
+## 2.2 Estimation of betas
+Use estimated factor loadings as stock betas on the selected market factors.
+```{r}
+Data2014.Returns.betas<-factorLoadings
+dim(Data2014.Returns.betas)
+```
+```{r}
+head(Data2014.Returns.betas)
+```
+```{r}
+matplot(1:10,t(Data2014.Returns.betas)[,1:6],type="l",lty=1,xlab="Market Factors",
+        ylab="Betas",lwd=2,ylim=c(-.2,.3),col=c("black","red","green","blue","purple","magenta"))
+legend("topleft",legend=rownames(Data2014.Returns.betas)[1:6],lty=1,lwd=2,
+       col=c("black","red","green","blue","purple","magenta"))
+```
+The resulting model obtained by PCA is: $R_i(t)=E[R_i]+L_1(i)f_1(t)+L_2(i)f_2(t)=α_i+β_1(i)f_1(t)+β_2(i)f_2(t)$, for i=1,...,6;
+It is called the equilibrium equation of APT.
+
+## 2.3 Estimation of market prices of risk
+Estimate linear model with $α−R_f$ as output column and the matrix of β as inputs.
+Here $R_f$ is the average risk-free Fed Funds rate for 2014.
+
+Estimate vector of market prices of risk.
+```{r}
+Market.Prices.of.risk.fit<- lm(I(zeroLoading-Mean.FedFunds)~.-1,data=data.frame(Data2014.Returns.betas))
+summary(Market.Prices.of.risk.fit)$coefficients
+```
+
+Identify market prices of risk which are insignificant.
+```{r}
+# The resulting vector of market prices of risk
+Market.Prices.of.risk<- Market.Prices.of.risk.fit$coefficients
+Market.Prices.of.risk
+```
+```{r}
+# Check R-squared
+summary(Market.Prices.of.risk.fit)$r.squared
+```
+```{r}
+# Check distribution of residuals
+modelResiduals<- as.vector(summary(Market.Prices.of.risk.fit)$residuals)
+hist(modelResiduals)
+```
+```{r}
+# qqplot of model residuals
+qqnorm(modelResiduals)
+qqline(modelResiduals)
+```
+
+Use the residuals of the equilibrium model to assess the prices of each stock relative to the prediction as of beginning of 2014.
+```{r}
+plot(modelResiduals,type="h",xlab="Stock",ylab="Residual")
+abline(h=0)
+```
+
+Make list of stocks recommended for long portfolio according to APT for 2014.
+```{r}
+secondLinearModelData<- data.frame(Market.Prices.of.risk.fit$residuals)
+longPortfolio<- rownames(secondLinearModelData)[modelResiduals>0]
+longPortfolio
+```
+
+Calculate weights `longPortfolioWeights` of the long portfolio based on the residuals.
+```{r}
+d_i<- secondLinearModelData[longPortfolio,]
+longPortfolioWeights<- d_i/sum(d_i)
+head(longPortfolioWeights)
+```
+```{r}
+sum(longPortfolioWeights)
+```
+
+Make list of stocks recommended for short portfolio according to APT for 2014.
+```{r}
+shortPortfolio<- rownames(secondLinearModelData)[modelResiduals<=0]
+shortPortfolio
+```
+
+Calculate weights `shortPortfolioWeights` of the long portfolio based on the residuals.
+```{r}
+D_i<- secondLinearModelData[shortPortfolio,]
+shortPortfolioWeights<- D_i/sum(D_i)
+head(shortPortfolioWeights)
+```
+```{r}
+sum(shortPortfolioWeights)
+```
+
+# 3. Market-Neutral Portfolio
+Create market-neutral portfolio of stocks according to the APT model as of the beginning of 2014 and track its value for the rest of the year.
+
+Calculate the initial value of weighted long portfolio.
+```{r}
+longOnlyValue<- as.matrix(Data2014[1,-(1:3)])[,longPortfolio]%*%longPortfolioWeights
+longOnlyValue
+```
+
+Calculate the initial value of weighted short portfolio.
+```{r}
+shortOnlyValue<- as.matrix(Data2014[1,-(1:3)])[,shortPortfolio]%*%shortPortfolioWeights
+shortOnlyValue
+```
+
+Find the proportion between the long and the short portfolio.
+```{r}
+c(longOnlyValue=longOnlyValue,shortOnlyValue=shortOnlyValue)
+```
+```{r}
+portfolioProportion<-shortOnlyValue/longOnlyValue
+unclass(portfolioProportion)
+```
+```{r}
+c(longOnlyShares=shortOnlyValue/longOnlyValue,shortOnlyShares=1)
+```
+
+Calculate value trajectory of the total portfolio and plot it.
+```{r}
+longValueTrajectory<- as.matrix(Data2014[,-(1:3)])[,longPortfolio]%*%longPortfolioWeights
+shortValueTrajectory<- as.matrix(Data2014[,-(1:3)])[,shortPortfolio]%*%shortPortfolioWeights
+totalPortfolioTrajectory<- longValueTrajectory%*%portfolioProportion-shortValueTrajectory
+
+plot(totalPortfolioTrajectory,type="l",xlab="2014",ylab="Value of Market-Neutral Portfolio",ylim=c(0,35),xlim=c(0,250))
+```
+```{r}
+head(totalPortfolioTrajectory)
+```
+
+
+# 4. Hedging Market-Neutral Portfolio
+Explore relationship between the portfolio and SPY.
+```{r}
+# Define cumulative returns of both trajectories and plot them
+cumReturnsSPY<- cumsum(c(0,diff(log(Data2014[,2]))))
+cumReturnsPortfolio<- cumsum(c(0,diff(log(1+totalPortfolioTrajectory))))
+cumReturnsPortfolioSPY<-cbind(Portfolio=cumReturnsPortfolio,SPY=cumReturnsSPY)
+head(cumReturnsPortfolioSPY)
+```
+```{r}
+matplot(1:length(cumReturnsPortfolioSPY[,1]),cumReturnsPortfolioSPY,
+        type="l",xlab="2014",ylab="Value of Market-Neutral Portfolio")
+```
+
+Both trajectories start at origin, but the portfolio is scaled differently.
+The X-Y plot is more informative.
+```{r}
+# cumReturnsPortfolioSPY[,2]: Cummulative returns of SPY
+# cumReturnsPortfolioSPY[,1]: Cummulative returns of Portfolio
+plot(cumReturnsPortfolioSPY[,2],cumReturnsPortfolioSPY[,1],type="l")
+```
+
+**Interpret the graph:**
+The qualities of the market-neutral portfolio is good. 
+1) When the cummulative returns of SPY decrease about 5%, the cummulative returns of the portfolio increase by 1.5 times in the opposite way. 
+2) When the cummulative returns of SPY increase, the cummulative returns of the portfolio increase in general. Even in the short period when portfolio doesn't go together with SPY in the same direction, it still remains positive return without causing a loss.
+
+The correlation is relatively strong since the plot shows a general positive linear trend, and I expect the regression model can fit this data to some extent. However, as there does exist some reversal patterns of the slopes, which indicates that there could be a cointegration effect, or some seriel correlations among the residuals. These effects could be tested using the following hedgeing models.
+
+## 4.1 Hedging using regression
+```{r}
+hedgeRatioModel<- lm(cumReturnsPortfolioSPY[,1]~cumReturnsPortfolioSPY[,2]-1)
+summary(hedgeRatioModel)
+```
+```{r}
+# Check the residuals of the linear model fit
+plot(hedgeRatioModel$residuals)
+```
+```{r}
+qqnorm(hedgeRatioModel$residuals)
+qqline(hedgeRatioModel$residuals)
+```
+```{r}
+acf(hedgeRatioModel$residuals,col ="blue",lty=1 ,lwd = 4)
+```
+```{r}
+Box.test.residuals<-Box.test(hedgeRatioModel$residuals,lag=10,type='Ljung')
+Box.test.residuals
+```
+
+The linear regression model assumes that the residuals are normally distributed. However, based on the residual plot, the residuals are not identically and independently distributed but follow some periodic "wave" patterns. The QQ plot also shows fat tails of the distribution.
+The ACF of residuals decays slowly, showing that the process of the residuals has long memory and is not stationary. Box-Ljung test also shows that serial correlation is still present.
+
+**Conclusion:** Linear model gives the hedge ratio of 32.1375379, i.e. for 1 unit of the portfolio the hedge contains approximately -32 units of SPY.
+
+## 4.2 Hedging using cointegration
+Select a more recent and shorter period of last 900 observations of the data.
+```{r}
+# Load library
+suppressWarnings(library(urca))
+suppressWarnings(library(timeDate))
+suppressWarnings(library(timeSeries))
+suppressWarnings(library(fBasics))
+```
+
+```{r}
+# Select last 900 observations
+n<- length(cumReturnsPortfolioSPY[,2])
+nb<- max(n-900,1)
+Portfolio<- cumReturnsPortfolioSPY[,1][nb:n]
+SPY<- cumReturnsPortfolioSPY[,2][nb:n]
+par(mfrow=c(2,1))
+plot(SPY, col="blue",type="l",lwd=1, main = "900 observations of SPY")
+plot(Portfolio,col="orange", type="l",lwd=1, main = "900 observations of Portfolio")
+```
+
+Fit cointegration model `cajo`.
+```{r}
+data <- cbind(Portfolio,SPY)
+cajo <- ca.jo(data, ecdet = "none", type="eigen", K=2, spec="longrun")
+summary(cajo)
+```
+
+Residuals and their ACF’s and PACF’s for 1 year and 3 year rate respectively
+```{r}
+plotres(cajo)
+```
+
+Check statistics and crical values of the test for cointegration order
+```{r}
+cajo@teststat
+```
+```{r}
+cajo@cval
+```
+```{r}
+barplot(cajo@cval[1,],main = "Johansen test h<=1",col = "red")
+abline(h=cajo@teststat[1], col="blue")
+legend("topleft", c("critical values","test statistics"), lwd=2,col = c("red","blue"), bty="n")
+```
+```{r}
+barplot(cajo@cval[2,],main = "Johansen test h=0",col = "red")
+abline(h=cajo@teststat[2], col="blue")
+legend("topleft", c("critical values","test statistics"), lwd=2,col = c("red","blue"), bty="n")
+```
+
+**Interpret the results of the fit:**
+We can make the conclusion that the cointegrating order equals 1. The reasons are as below.
+
+If the test statistic is greater than the corresponding critical value the null hypothesis is rejected with that confidence.
+
+The first chart shows the critical values and test statistic for $H_0: h≤1$, where h is the order of cointegration. For all levels of 10%, 5%, 1% the statistic is below the critical values. So, $H_0: h≤1$ cannot be rejected.
+
+The second chart shows the same variables, but for $H_0: h=0$.
+For this null hypothesis the test statistic is above the critical values for 10% and for 5%. So, with levels of 5% or more $H_0: h=0$ is rejected. Therefore, we can conclude that the cointegrating order equals 1.
+
+Cointegrated vector $a_1=(a_{1,1},a_{1,2})$, normalised with respect to the first variable is:
+```{r}
+a_1<- cajo@V[,1]
+a_1
+```
+
+By definition of cointegration with order h=1 process $z_{t,1}=a_{T1} x_t$ must be stationary (I(0)).
+```{r}
+z_t1= cumReturnsPortfolioSPY %*% a_1
+matplot(z_t1,type ="l", main = "z(1,t)=a1'x(t)", col = "blue")
+```
+
+The mixed process looks stationary for most of the year with, maybe, exception of the first 50-60 days.
+
+Estimate autoregression model for process $z_{t,1}$
+```{r}
+zar <-ar(z_t1,  aic = TRUE,method = "yule-walker")
+zar$order
+```
+
+The order of the AR process is chosen by `ar()` using the Akaike Information Criterion (AIC). Check the roots of characteristic equation.
+```{r}
+par(mfrow = c(1, 1), cex = 0.9)
+library(plotrix)
+
+polyPar<-c(1,-zar$ar)
+r1<-polyroot(polyPar)
+Mod(r1)
+
+r1Re<-Re(r1)
+r1Im<-Im(r1)
+plot(r1Re,r1Im,asp=1,xlim=c(min(c(r1Re,-1)),max(c(r1Re,1))),
+     ylim=c(min(c(r1Im,-1)),max(c(1,r1Im))))
+draw.circle(0,0,radius=1)
+abline(v=0)
+abline(h=0)
+```
+
+Try testing the stationarity of the mixed process without the first 60 days.
+```{r}
+matplot(z_t1[-(1:60),],type ="l", main = "z(1,t)=a1'x(t)", col = "blue")
+```
+```{r}
+zar <-ar(z_t1[-(1:60),],  aic = TRUE,method = "yule-walker")
+zar$order
+```
+```{r}
+polyPar2<-c(1,-zar$ar)
+r2<-polyroot(polyPar2)
+Mod(r2)
+
+r2Re<-Re(r2)
+r2Im<-Im(r2)
+plot(r2Re,r2Im,asp=1,xlim=c(min(c(r2Re,-1)),max(c(r2Re,1))),
+     ylim=c(min(c(r2Im,-1)),max(c(r2Im,1))))
+draw.circle(0,0,radius=1)
+abline(v=0)
+abline(h=0)
+```
+
+The root of the shortened process moved away from the non-stationary territory.
+
+Since cointegration order equals 1, vector $a_2=(a_{2,1},a_{2,2})$ should not be a cointegration vector and the process $z_{t,2}=a′_2x_t$ should not be stationary.
+```{r}
+a_2<- cajo@V[,2]
+z_t2= cumReturnsPortfolioSPY %*% a_2
+matplot(z_t2,type ="l", main = "z(2,t)=a2'x(t)", col = "blue")
+```
+
+It indeed looks non-stationary, or at least less stationary than the first cointegrated mix. 
+
+Make the same check of stationarity for the second cointegrateion vector.
+```{r}
+zar <-ar(z_t2,  aic = TRUE,method = "yule-walker")
+zar$order
+```
+```{r}
+par(mfrow = c(1, 1), cex = 0.9)
+polyPar3<-c(1,-zar$ar)
+r3<-polyroot(polyPar3)
+Mod(r3)
+
+r3Re<-Re(r3)
+r3Im<-Im(r3)
+plot(r3Re,r3Im,asp=1,xlim=c(min(c(r3Re,-1)),max(c(r3Re,1))),
+     ylim=c(min(c(r3Im,-1)),max(c(r3Im,1))))
+draw.circle(0,0,radius=1)
+abline(v=0)
+abline(h=0)
+```
+
+Technically it is stationary. But the root is very close to the unit circle, it is less stationary than the first cointegration mix.
+
+**Conclusion:** the choice of cointegration hedging ratio is 1, -11.434193.
+
+Compare residuals from both hedging methods.
+```{r}
+hedgingResults<-cbind(Regression=hedgeRatioModel$residuals,
+                      Cointegration_1=z_t1,Cointegration_2=z_t2)
+matplot(1:length(hedgingResults[,1]),hedgingResults,type="p",pch=16)
+```
+
+Note that `Cointegration_2` looks similar to `Regression`. Their hedging ratios are also similar:
+```{r}
+c(hedgeRatioModel$coefficients,abs(a_2[2]))
+```
+
+Check the summary statistics of all three hedging residuals sets.
+```{r}
+summaries<-apply(hedgingResults,2,summary)
+summaries<-rbind(summaries,sd=apply(hedgingResults,2,sd))
+colnames(summaries)<-c("Regression","Cointegration_1","Cointegration_2")
+summaries
+```
+
+We can see that residuals of `Cointegration_1` are shifted relative to zero. This occurs because the `Cointegration_1`:$z_{t,1}=a_{T1} x_t$ must be stationary (I(0)) in the model, while in `Cointegration_1` it is not. 
+
+I think this is a problem. Because when the residuals are shifted to the positive direction (i.e. all the residuals are >=0), then the protfolio returns will always be overestimated. Since the residual here is still serial correlated, then the model cannot detect the negative error or even track overall trend of volatility, which influences the hedgeing result.
+
+In this case, `Cointegration_2` performs better since it tracks the trend, and the variance level of cointegration errors is lower than for errors of the regression model. 
